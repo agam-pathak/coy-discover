@@ -1,33 +1,45 @@
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  try {
-    // Find the demo user.
-    const demoUser = await prisma.user.findUnique({
-      where: {
-        profileId: "demo-user",
-      },
-      select: {
-        id: true,
-        profileId: true,
-      },
-    });
+    await connection();
 
-    if (!demoUser) {
+    try {
+    const session = await auth();
+
+    if (!session?.user?.id) {
       return NextResponse.json(
-        { error: "Demo user not found. Run the database seed first." },
-        { status: 404 }
+        { success: false, error: "Please sign in.", code: "UNAUTHORIZED" },
+        { status: 401 }
       );
     }
 
-    // Fetch profiles that the demo user has not swiped on.
-    const where = {
-      isDemoUser: false,
-      outgoingSwipes: {
-        none: {
-          actorId: demoUser.profileId,
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        profile: { select: { id: true } },
+      },
+    });
+
+    if (!user?.profile) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Complete your profile to discover people.",
+          code: "PROFILE_REQUIRED",
         },
+        { status: 409 }
+      );
+    }
+
+    const profileId = user.profile.id;
+
+    const where = {
+      id: { not: profileId },
+      isDemoUser: false,
+      incomingSwipes: {
+        none: { actorId: profileId },
       },
     };
 
@@ -44,22 +56,17 @@ export async function GET() {
           college: true,
           interests: true,
         },
-        orderBy: {
-          createdAt: "asc",
-        },
+        orderBy: { createdAt: "asc" },
         take: 20,
       }),
-
       prisma.profile.count({ where }),
     ]);
 
-    // Convert stored JSON strings into arrays.
     const safeProfiles = profiles.map((profile) => {
       let interests: string[] = [];
 
       try {
         const parsed: unknown = JSON.parse(profile.interests);
-
         if (
           Array.isArray(parsed) &&
           parsed.every((item) => typeof item === "string")
@@ -70,10 +77,7 @@ export async function GET() {
         interests = [];
       }
 
-      return {
-        ...profile,
-        interests,
-      };
+      return { ...profile, interests };
     });
 
     return NextResponse.json({
@@ -87,7 +91,7 @@ export async function GET() {
     console.error("Feed API error:", error);
 
     return NextResponse.json(
-      { error: "Unable to fetch discovery feed." },
+      { success: false, error: "Unable to fetch discovery feed." },
       { status: 500 }
     );
   }

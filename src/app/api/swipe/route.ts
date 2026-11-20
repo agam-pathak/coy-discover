@@ -1,6 +1,7 @@
-
+ 
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 const swipeSchema = z.object({
@@ -19,7 +20,15 @@ function isUniqueConstraintError(error: unknown): boolean {
 
 export async function POST(request: Request) {
   try {
-    // 1. Validate request body
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { success: false, error: "Please sign in.", code: "UNAUTHORIZED" },
+        { status: 401 }
+      );
+    }
+
     let body: unknown;
 
     try {
@@ -46,34 +55,41 @@ export async function POST(request: Request) {
 
     const { targetId, action } = validation.data;
 
-    // 2. Perform swipe and matching atomically
     const result = await prisma.$transaction(async (tx) => {
-      const demoUser = await tx.user.findUnique({
-        where: { profileId: "demo-user" },
-        select: { id: true, profileId: true },
+      const user = await tx.user.findUnique({
+        where: { id: session.user.id },
+        select: {
+          id: true,
+          profile: { select: { id: true } },
+        },
       });
 
-      if (!demoUser) {
-        return { status: "demo_user_missing" as const };
+      if (!user?.profile) {
+        return { status: "profile_required" as const };
       }
 
-      // 3. Validate target profile
+      const actorId = user.profile.id;
+
+      if (targetId === actorId) {
+        return { status: "self_swipe" as const };
+      }
+
       const target = await tx.profile.findUnique({
         where: { id: targetId },
-        select: { id: true, isDemoUser: true },
+        select: {
+          id: true,
+          isDemoUser: true,
+          user: { select: { id: true } },
+        },
       });
 
       if (!target || target.isDemoUser) {
         return { status: "target_missing" as const };
       }
 
-      // 4. Prevent duplicate swipes
       const existingSwipe = await tx.swipe.findUnique({
         where: {
-          actorId_targetId: {
-            actorId: demoUser.profileId,
-            targetId,
-          },
+          actorId_targetId: { actorId, targetId },
         },
       });
 
@@ -81,13 +97,8 @@ export async function POST(request: Request) {
         return { status: "already_swiped" as const };
       }
 
-      // 5. Save swipe
       const swipe = await tx.swipe.create({
-        data: {
-          actorId: demoUser.profileId,
-          targetId,
-          action,
-        },
+        data: { actorId, targetId, action },
         select: {
           id: true,
           actorId: true,
@@ -100,12 +111,11 @@ export async function POST(request: Request) {
       let matched = false;
       let matchId: string | null = null;
 
-      // 6. Check for a mutual LIKE
       if (action === "LIKE") {
         const reverseSwipe = await tx.swipe.findFirst({
           where: {
             actorId: targetId,
-            targetId: demoUser.profileId,
+            targetId: actorId,
             action: "LIKE",
           },
         });
@@ -114,17 +124,35 @@ export async function POST(request: Request) {
           const match = await tx.match.upsert({
             where: {
               userId_profileId: {
-                userId: demoUser.id,
+                userId: user.id,
                 profileId: targetId,
               },
             },
             create: {
-              userId: demoUser.id,
+              userId: user.id,
               profileId: targetId,
             },
             update: {},
             select: { id: true },
           });
+
+          // If the target profile belongs to a registered user,
+          // create the reciprocal match for that user too.
+          if (target.user) {
+            await tx.match.upsert({
+              where: {
+                userId_profileId: {
+                  userId: target.user.id,
+                  profileId: actorId,
+                },
+              },
+              create: {
+                userId: target.user.id,
+                profileId: actorId,
+              },
+              update: {},
+            });
+          }
 
           matched = true;
           matchId = match.id;
@@ -139,11 +167,21 @@ export async function POST(request: Request) {
       };
     });
 
-    // 7. Handle transaction outcomes
-    if (result.status === "demo_user_missing") {
+    if (result.status === "profile_required") {
       return NextResponse.json(
-        { success: false, error: "Demo user not found." },
-        { status: 404 }
+        {
+          success: false,
+          error: "Complete your profile before swiping.",
+          code: "PROFILE_REQUIRED",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (result.status === "self_swipe") {
+      return NextResponse.json(
+        { success: false, error: "You cannot swipe on your own profile." },
+        { status: 400 }
       );
     }
 
@@ -164,9 +202,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        message: result.matched
-          ? "It's a match!"
-          : "Swipe recorded successfully.",
+        message: result.matched ? "It's a match!" : "Swipe recorded successfully.",
         swipe: result.swipe,
         matched: result.matched,
         matchId: result.matchId,

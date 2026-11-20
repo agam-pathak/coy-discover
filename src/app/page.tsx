@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AnimatePresence,
   motion,
@@ -58,6 +59,7 @@ type MatchesResponse = {
 };
 
 export default function DiscoverPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("Discover");
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -133,10 +135,52 @@ export default function DiscoverPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void loadFeed();
-    void loadMatches();
-  }, [loadFeed, loadMatches]);
+   useEffect(() => {
+  let active = true;
+
+  async function initializeApp() {
+    try {
+      const response = await fetch("/api/profile", {
+        cache: "no-store",
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Unable to verify your profile.");
+      }
+
+      if (!data.profile) {
+        router.replace("/onboarding");
+        return;
+      }
+
+      if (active) {
+        await Promise.all([loadFeed(), loadMatches()]);
+      }
+    } catch (error) {
+      if (active) {
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Unable to initialize the app."
+        );
+        setLoading(false);
+      }
+    }
+  }
+
+  void initializeApp();
+
+  return () => {
+    active = false;
+  };
+}, [loadFeed, loadMatches, router]);
 
   async function swipe(action: "LIKE" | "PASS") {
     if (!current || busy) return;

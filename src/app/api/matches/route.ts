@@ -1,25 +1,40 @@
-
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  try {
-    const demoUser = await prisma.user.findUnique({
-      where: { profileId: "demo-user" },
-      select: { id: true },
+    await connection();
+
+    try {
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { success: false, error: "Please sign in.", code: "UNAUTHORIZED" },
+        { status: 401 }
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        profile: { select: { id: true } },
+      },
     });
 
-    if (!demoUser) {
+    if (!user?.profile) {
       return NextResponse.json(
-        { success: false, error: "Demo user not found." },
-        { status: 404 }
+        {
+          success: false,
+          error: "Complete your profile to view matches.",
+          code: "PROFILE_REQUIRED",
+        },
+        { status: 409 }
       );
     }
 
     const matches = await prisma.match.findMany({
-      where: {
-        userId: demoUser.id,
-      },
+      where: { userId: session.user.id },
       include: {
         profile: {
           select: {
@@ -34,18 +49,14 @@ export async function GET() {
           },
         },
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: { createdAt: "desc" },
     });
 
     const safeMatches = matches.map((match) => {
       let interests: string[] = [];
 
       try {
-        const parsed: unknown = JSON.parse(
-          match.profile.interests
-        );
+        const parsed: unknown = JSON.parse(match.profile.interests);
 
         if (
           Array.isArray(parsed) &&
@@ -76,10 +87,7 @@ export async function GET() {
     console.error("Matches API error:", error);
 
     return NextResponse.json(
-      {
-        success: false,
-        error: "Unable to fetch matches.",
-      },
+      { success: false, error: "Unable to fetch matches." },
       { status: 500 }
     );
   }
