@@ -111,10 +111,8 @@ export async function POST(request: Request) {
 
     // 5. Save the user and OTP challenge atomically.
     const challenge = await prisma.$transaction(async (tx) => {
-      let userId: string;
-
       if (existingUser) {
-        const updatedUser = await tx.user.update({
+        await tx.user.update({
           where: { id: existingUser.id },
           data: {
             name,
@@ -122,10 +120,8 @@ export async function POST(request: Request) {
           },
           select: { id: true },
         });
-
-        userId = updatedUser.id;
       } else {
-        const newUser = await tx.user.create({
+        await tx.user.create({
           data: {
             name,
             email,
@@ -133,8 +129,6 @@ export async function POST(request: Request) {
           },
           select: { id: true },
         });
-
-        userId = newUser.id;
       }
 
       // Invalidate previous unused registration OTPs.

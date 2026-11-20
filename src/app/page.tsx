@@ -368,7 +368,7 @@ export default function DiscoverPage() {
                       </p>
 
                       <p className="mt-2 text-xs text-pink-400">
-                        It's a match! ♥
+                        It&apos;s a match! ♥
                       </p>
                     </div>
                   </div>
@@ -463,7 +463,7 @@ export default function DiscoverPage() {
 
                     <p className="mt-3 leading-7 text-gray-400">
                       Like someone who catches your attention.
-                      When they like you back, it's a mutual match.
+                      When they like you back, it&apos;s a mutual match.
                     </p>
 
                   </div>
@@ -508,11 +508,11 @@ export default function DiscoverPage() {
                 />
 
                 <h2 className="text-2xl font-black">
-                  You're all caught up!
+                  You&apos;re all caught up!
                 </h2>
 
                 <p className="mt-3 max-w-sm text-sm text-gray-400">
-                  You've explored all the profiles in this batch.
+                  You&apos;ve explored all the profiles in this batch.
                   New connections might still be waiting.
                 </p>
 
@@ -607,7 +607,7 @@ export default function DiscoverPage() {
               />
 
               <h2 className="text-4xl font-black">
-                It's a match!
+                It&apos;s a match!
               </h2>
 
               <div
